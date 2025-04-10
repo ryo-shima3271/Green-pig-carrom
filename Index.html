@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Green Pig Carrom - AI Turn</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    canvas {
+      display: block;
+      margin: auto;
+      background: #222;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="400" height="700"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const imageAssets = {};
+const imagesToLoad = {
+  background: 'https://i.postimg.cc/ryNGGk2X/Background-3.png',
+  field: 'https://i.postimg.cc/m26HVZdq/Game-field-2.png',
+  smallCoin: 'https://i.postimg.cc/ZKTrqDgb/Scoring-coin-small.png',
+  largeCoin: 'https://i.postimg.cc/G2dpj6v9/Scoring-coin-large.png',
+  red: 'https://i.postimg.cc/k2YmnRZ6/red.png',
+  yellow: 'https://i.postimg.cc/QFdDGJ6Z/yellow.png',
+  pink: 'https://i.postimg.cc/K4txnzKw/pink.png',
+  blue: 'https://i.postimg.cc/5HHMjNdP/blue.png',
+  black: 'https://i.postimg.cc/Xp33xbdJ/black.png',
+  gray: 'https://i.postimg.cc/QMm5QN1F/gray-2.png'
+};
+
+let loadedCount = 0;
+const totalToLoad = Object.keys(imagesToLoad).length;
+
+for (const [key, src] of Object.entries(imagesToLoad)) {
+  const img = new Image();
+  img.onload = () => {
+    imageAssets[key] = img;
+    loadedCount++;
+    if (loadedCount === totalToLoad) init();
+  };
+  img.onerror = () => {
+    console.error(`Failed to load image: ${key}`);
+  };
+  img.src = src;
+}
+
+const scoringCoins = [
+  { x: 200, y: 340, radius: 15, type: 'smallCoin' },
+  { x: 185, y: 355, radius: 15, type: 'smallCoin' },
+  { x: 215, y: 355, radius: 15, type: 'smallCoin' },
+  { x: 200, y: 370, radius: 15, type: 'smallCoin' },
+  { x: 165, y: 355, radius: 20, type: 'largeCoin' },
+  { x: 235, y: 355, radius: 20, type: 'largeCoin' },
+];
+
+const playerBirds = [
+  { x: 100, y: 620, radius: 30, type: 'red', vx: 0, vy: 0 },
+  { x: 200, y: 620, radius: 30, type: 'yellow', vx: 0, vy: 0 },
+  { x: 300, y: 620, radius: 30, type: 'pink', vx: 0, vy: 0 },
+];
+
+const aiBirds = [
+  { x: 100, y: 80, radius: 30, type: 'blue', vx: 0, vy: 0 },
+  { x: 200, y: 80, radius: 30, type: 'black', vx: 0, vy: 0 },
+  { x: 300, y: 80, radius: 30, type: 'gray', vx: 0, vy: 0 },
+];
+
+let currentPlayer = 'player';
+let selectedBird = null;
+let dragStart = null;
+let aiCooldown = 0;
+let playerScore = 0;
+let aiScore = 0;
+let gameOver = false;
+const clickSound = new Audio('https://freesound.org/data/previews/341/341695_5260877-lq.mp3'); // Carrom click sound
+const goalSound = new Audio('https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg');
+
+function isAnyObjectMoving() {
+  const all = [...playerBirds, ...aiBirds, ...scoringCoins];
+  return all.some(obj => Math.abs(obj.vx || 0) > 0 || Math.abs(obj.vy || 0) > 0);
+}
+
+function init() {
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointerup', onPointerUp);
+  requestAnimationFrame(gameLoop);
+}
+
+function onPointerDown(e) {
+  if (currentPlayer !== 'player' || isAnyObjectMoving()) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  dragStart = { x, y };
+  for (const bird of playerBirds) {
+    const dx = bird.x - x;
+    const dy = bird.y - y;
+    if (Math.sqrt(dx * dx + dy * dy) < bird.radius) {
+      selectedBird = bird;
+      break;
+    }
+  }
+}
+
+function onPointerUp(e) {
+  if (!selectedBird || !dragStart) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const dx = dragStart.x - x;
+  const dy = dragStart.y - y;
+  selectedBird.vx = -dx / 5;
+  selectedBird.vy = -dy / 5;
+  selectedBird = null;
+  dragStart = null;
+  currentPlayer = 'ai';
+  aiCooldown = 60;
+}
+
+function updatePositions() {
+  const goalWidth = 100;
+  const playerGoal = { x: (canvas.width - goalWidth) / 2, y: 10, width: goalWidth, height: 30 };
+  const aiGoal = { x: (canvas.width - goalWidth) / 2, y: 660, width: goalWidth, height: 30 };
+  const birds = [...playerBirds, ...aiBirds];
+  const coins = scoringCoins;
+  const all = [...birds, ...coins];
+
+  for (const obj of all) {
+    obj.x += obj.vx || 0;
+    obj.y += obj.vy || 0;
+    obj.vx = (obj.vx || 0) * 0.97;
+    obj.vy = (obj.vy || 0) * 0.97;
+    if (Math.abs(obj.vx) < 0.1) obj.vx = 0;
+    if (Math.abs(obj.vy) < 0.1) obj.vy = 0;
+    const padding = 20;
+    if (obj.x - obj.radius < padding || obj.x + obj.radius > canvas.width - padding) {
+      obj.vx *= -1;
+      obj.x = Math.max(obj.radius + padding, Math.min(obj.x, canvas.width - obj.radius - padding));
+    }
+    if (obj.y - obj.radius < padding || obj.y + obj.radius > canvas.height - padding) {
+      obj.vy *= -1;
+      obj.y = Math.max(obj.radius + padding, Math.min(obj.y, canvas.height - obj.radius - padding));
+    }
+  }
+
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const a = all[i];
+      const b = all[j];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const minDist = a.radius + b.radius;
+      if (dist < minDist && dist > 0) {
+        const overlap = (minDist - dist) / 2;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        a.x -= nx * overlap;
+        a.y -= ny * overlap;
+        b.x += nx * overlap;
+        b.y += ny * overlap;
+        const tx = nx;
+        const ty = ny;
+        const dpTanA = (a.vx || 0) * (-ty) + (a.vy || 0) * tx;
+        const dpTanB = (b.vx || 0) * (-ty) + (b.vy || 0) * tx;
+        const dpNormA = (a.vx || 0) * tx + (a.vy || 0) * ty;
+        const dpNormB = (b.vx || 0) * tx + (b.vy || 0) * ty;
+        clickSound.currentTime = 0;
+        clickSound.play();
+        const m1 = dpNormB;
+        const m2 = dpNormA;
+        a.vx = tx * m1 + (-ty) * dpTanA;
+        a.vy = ty * m1 + tx * dpTanA;
+        b.vx = tx * m2 + (-ty) * dpTanB;
+        b.vy = ty * m2 + tx * dpTanB;
+      }
+    }
+  }
+
+  for (let i = scoringCoins.length - 1; i >= 0; i--) {
+    const coin = scoringCoins[i];
+    const dxPlayer = coin.x - (playerGoal.x + playerGoal.width / 2);
+    const dyPlayer = coin.y - (playerGoal.y + playerGoal.height / 2);
+    const distPlayer = Math.sqrt(dxPlayer * dxPlayer + dyPlayer * dyPlayer);
+    const isInPlayerGoal = distPlayer <= coin.radius + Math.max(playerGoal.width, playerGoal.height) / 2;
+    const dxAi = coin.x - (aiGoal.x + aiGoal.width / 2);
+    const dyAi = coin.y - (aiGoal.y + aiGoal.height / 2);
+    const distAi = Math.sqrt(dxAi * dxAi + dyAi * dyAi);
+    const isInAiGoal = distAi <= coin.radius + Math.max(aiGoal.width, aiGoal.height) / 2;
+    if (isInPlayerGoal || isInAiGoal) {
+      const points = coin.type === 'largeCoin' ? 2 : 1;
+      if (isInPlayerGoal) playerScore += points;
+      if (isInAiGoal) aiScore += points;
+      goalSound.currentTime = 0;
+      goalSound.play();
+      scoringCoins.splice(i, 1);
+      if (playerScore >= 5 || aiScore >= 5) {
+        gameOver = true;
+        setTimeout(() => location.reload(), 3000);
+      }
+    }
+  }
+
+  for (const bird of playerBirds.concat(aiBirds)) {
+    const isInPlayerGoal = bird.x > playerGoal.x && bird.x < playerGoal.x + playerGoal.width && bird.y > playerGoal.y && bird.y < playerGoal.y + playerGoal.height;
+    const isInAiGoal = bird.x > aiGoal.x && bird.x < aiGoal.x + aiGoal.width && bird.y > aiGoal.y && bird.y < aiGoal.y + aiGoal.height;
+    if (isInPlayerGoal || isInAiGoal) {
+      bird.vx = 0;
+      bird.vy = 0;
+      bird.x = -100;
+      bird.y = -100;
+      bird._inGoal = true;
+    } else if (bird._inGoal && currentPlayer === (playerBirds.includes(bird) ? 'player' : 'ai')) {
+      if (playerBirds.includes(bird)) {
+        bird.x = 100 + playerBirds.indexOf(bird) * 100;
+        bird.y = 620;
+      } else {
+        bird.x = 100 + aiBirds.indexOf(bird) * 100;
+        bird.y = 80;
+      }
+      bird._inGoal = false;
+    }
+  }
+
+  if (currentPlayer === 'ai' && aiCooldown-- <= 0 && !isAnyObjectMoving()) {
+    const ai = aiBirds[Math.floor(Math.random() * aiBirds.length)];
+    ai.vx = (Math.random() - 0.5) * 10;
+    ai.vy = (Math.random() * 5) + 5;
+    currentPlayer = 'player';
+  }
+}
+
+function draw() {
+  const goalWidth = 60;
+  const playerGoal = { x: (canvas.width - goalWidth) / 2, y: 10, width: goalWidth, height: 30 };
+  const aiGoal = { x: (canvas.width - goalWidth) / 2, y: 660, width: goalWidth, height: 30 };
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(imageAssets.background, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(imageAssets.field, 20, 20, canvas.width - 40, canvas.height - 40);
+  ctx.fillStyle = 'orange';
+  ctx.fillRect(playerGoal.x, playerGoal.y, playerGoal.width, playerGoal.height);
+  
+  ctx.fillRect(aiGoal.x, aiGoal.y, aiGoal.width, aiGoal.height);
+  
+  ctx.fillStyle = 'white';
+  ctx.font = '20px Arial';
+  ctx.fillText(`Player: ${playerScore}`, 10, 30);
+  ctx.fillText(`AI: ${aiScore}`, 310, 30);
+  if (gameOver) {
+    ctx.fillStyle = 'yellow';
+    ctx.font = '30px Arial';
+    ctx.fillText(`${playerScore >= 5 ? 'PLAYER' : 'AI'} WINS!`, 110, canvas.height / 2);
+  }
+  for (const coin of scoringCoins) {
+    const img = imageAssets[coin.type];
+    if (img?.naturalWidth > 0) {
+      ctx.drawImage(img, coin.x - coin.radius, coin.y - coin.radius, coin.radius * 2, coin.radius * 2);
+    } else {
+      ctx.beginPath();
+      ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+      ctx.fillStyle = coin.type === 'largeCoin' ? 'orange' : 'green';
+      ctx.fill();
+    }
+  }
+  for (const bird of playerBirds.concat(aiBirds)) {
+    const img = imageAssets[bird.type];
+    if (img?.naturalWidth > 0) {
+      ctx.drawImage(img, bird.x - bird.radius, bird.y - bird.radius, bird.radius * 2, bird.radius * 2);
+    } else {
+      ctx.beginPath();
+      ctx.arc(bird.x, bird.y, bird.radius, 0, Math.PI * 2);
+      ctx.fillStyle = 'white';
+      ctx.fill();
+    }
+  }
+}
+
+function gameLoop() {
+  updatePositions();
+  draw();
+  if (!gameOver) requestAnimationFrame(gameLoop);
+}
+const backgroundMusic = new Audio('https://cdn.pixabay.com/download/audio/2023/03/07/audio_2c7fdc765d.mp3?filename=funny-game-background-loop-141746.mp3');
+backgroundMusic.loop = true;
+backgroundMusic.volume = 0.5;
+backgroundMusic.play().catch(e => console.warn('Music play blocked:', e));
+</script>
+</body>
+</html>
